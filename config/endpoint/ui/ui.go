@@ -19,6 +19,9 @@ type Config struct {
 	// DontResolveFailedConditions whether to resolve failed conditions in the Result for display in the UI
 	DontResolveFailedConditions bool `yaml:"dont-resolve-failed-conditions"`
 
+	// ShowResponse whether to show the response body in the UI
+	ShowResponse bool `yaml:"show-response,omitempty"`
+
 	// Badge is the configuration for the badges generated
 	Badge *Badge `yaml:"badge"`
 }

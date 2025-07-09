@@ -326,6 +326,14 @@ func (e *Endpoint) EvaluateHealth() *Result {
 			}
 		}
 	}
+	// If the UIConfig is set to show the response body, add it to the errors
+	if e.UIConfig.ShowResponse && len(result.Body) > 0 {
+		for message := range strings.SplitSeq(string(result.Body), "\n") {
+			if len(message) > 0 {
+				result.AddError(message)
+			}
+		}
+	}
 	// Evaluate the conditions
 	for _, condition := range e.Conditions {
 		success := condition.evaluate(result, e.UIConfig.DontResolveFailedConditions)
@@ -487,6 +495,9 @@ func (e *Endpoint) buildHTTPRequest() *http.Request {
 // needsToReadBody checks if there's any condition that requires the response Body to be read
 func (e *Endpoint) needsToReadBody() bool {
 	if e.Jq != nil && len(e.Jq.Filter) > 0 {
+		return true
+	}
+	if e.UIConfig.ShowResponse {
 		return true
 	}
 	for _, condition := range e.Conditions {
