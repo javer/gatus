@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -70,6 +71,14 @@ var (
 	ErrInvalidEndpointIntervalForDomainExpirationPlaceholder = errors.New("the minimum interval for an endpoint with a condition using the " + DomainExpirationPlaceholder + " placeholder is 300s (5m)")
 )
 
+// Jq is the configuration for the jq filtering of the response body
+type Jq struct {
+	// Filter is the jq filter to apply to the response body
+	Filter string `yaml:"filter,omitempty"`
+	// RawOutput is whether to return the raw output
+	RawOutput bool `yaml:"raw-output,omitempty"`
+}
+
 // Endpoint is the configuration of a service to be monitored
 type Endpoint struct {
 	// Enabled defines whether to enable the monitoring of the endpoint
@@ -98,6 +107,9 @@ type Endpoint struct {
 
 	// Interval is the duration to wait between every status check
 	Interval time.Duration `yaml:"interval,omitempty"`
+
+	// Jq filter of the response body
+	Jq *Jq `yaml:"jq,omitempty"`
 
 	// Conditions used to determine the health of the endpoint
 	Conditions []Condition `yaml:"conditions"`
@@ -294,6 +306,34 @@ func (e *Endpoint) EvaluateHealth() *Result {
 	} else {
 		result.Success = false
 	}
+	// Apply jq filter if specified
+	if e.Jq != nil && len(e.Jq.Filter) > 0 {
+		if result.Body == nil {
+			result.AddError("cannot apply jq filter because the response body is empty")
+		} else {
+			args := []string{}
+			if e.Jq.RawOutput {
+				args = append(args, "--raw-output")
+			}
+			args = append(args, e.Jq.Filter)
+			cmd := exec.Command("jq", args...)
+			cmd.Stdin = bytes.NewBuffer(result.Body)
+			output, err := cmd.Output()
+			if err != nil {
+				result.AddError("cannot apply jq filter: " + err.Error())
+			} else {
+				result.Body = output
+			}
+		}
+	}
+	// If the UIConfig is set to show the response body, add it to the errors
+	if e.UIConfig.ShowResponse && len(result.Body) > 0 {
+		for message := range strings.SplitSeq(string(result.Body), "\n") {
+			if len(message) > 0 {
+				result.AddError(message)
+			}
+		}
+	}
 	// Evaluate the conditions
 	for _, condition := range e.Conditions {
 		success := condition.evaluate(result, e.UIConfig.DontResolveFailedConditions)
@@ -454,6 +494,12 @@ func (e *Endpoint) buildHTTPRequest() *http.Request {
 
 // needsToReadBody checks if there's any condition that requires the response Body to be read
 func (e *Endpoint) needsToReadBody() bool {
+	if e.Jq != nil && len(e.Jq.Filter) > 0 {
+		return true
+	}
+	if e.UIConfig.ShowResponse {
+		return true
+	}
 	for _, condition := range e.Conditions {
 		if condition.hasBodyPlaceholder() {
 			return true
